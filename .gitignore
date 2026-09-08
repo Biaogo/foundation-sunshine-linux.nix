@@ -1,0 +1,5 @@
+.git
+result
+result-*
+*.swp
+.DS_Store
