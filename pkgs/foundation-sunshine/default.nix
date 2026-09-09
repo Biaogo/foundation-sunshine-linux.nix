@@ -78,7 +78,7 @@
 }:
 let
   version = "2026.09.07";
-  rev = "e4dbcca1"; # tag: v2026.09.07-linux (forced-update to track fixes; README @ e4dbcca1)
+  rev = "33051b67a353dc39ae8a419bf5f651c1c4da220d"; # tag: v2026.09.07-linux
 
   # Gitlink pins recorded in the source repo (git ls-tree <rev> third-party).
   # moonlight-common-c needs fetchSubmodules: it carries a nested `enet`
@@ -164,7 +164,7 @@ stdenv'.mkDerivation (finalAttrs: {
     owner = "Biaogo";
     repo = "foundation-sunshine-linux";
     inherit rev;
-    hash = "sha256-Rwr6+L+8LFtxFDlInZAvsIdbRc7vfrwZXkBN0X9lVBw=";
+    hash = "sha256-f8eKLBgOLc26NDDkQ3zK4aDXn45MjU55J/fbGWTqM+M=";
   };
 
   # Web UI (vite 8 / rolldown) — engines demand node >=26.7 <27.
@@ -340,7 +340,9 @@ stdenv'.mkDerivation (finalAttrs: {
   env = {
     # needed to trigger CMake version configuration (cmake/prep/build_version.cmake)
     BUILD_VERSION = finalAttrs.version;
-    BRANCH = "linux-support";
+    # build_version.cmake only honours BUILD_VERSION when BRANCH=="master";
+    # any other branch makes the binary version fall back to 0.0.0.<commit>.
+    BRANCH = "master";
     COMMIT = lib.substring 0 8 rev;
   };
 
