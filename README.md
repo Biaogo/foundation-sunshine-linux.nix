@@ -75,10 +75,15 @@ nix build github:Biaogo/foundation-sunshine-linux.nix
 
 ## Releases
 
-Prebuilt tarballs (x86_64-linux, built from this flake with dynamic CUDA) are
-attached to the
+Prebuilt tarballs are attached to the fork's releases. The
 [`v2026.09.07-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.09.07-linux)
-release. Nix users should prefer the flake — it wires up the full runtime
+tag is force-updated to track the `linux-support` fix series (currently
+`33051b67`: virtual-display routing under dual capture sources, ambient
+CAP_SYS_ADMIN shedding, KWin permission-gate workaround docs) — this pin
+follows that tag commit exactly, so the flake hash and the release tarball
+are built from the same source tree.
+
+Nix users should prefer the flake — it wires up the full runtime
 closure (ffmpeg/boost statics, CUDA, pipewire, avahi) that a bare tarball
 cannot provide on non-NixOS distros.
 
