@@ -78,7 +78,7 @@
 }:
 let
   version = "2026.09.07";
-  rev = "8a4dd8180b29f1a24c2a14188a58a21caf1052e4"; # tag: v2026.09.07-linux
+  rev = "e4dbcca1"; # tag: v2026.09.07-linux (forced-update to track fixes; README @ e4dbcca1)
 
   # Gitlink pins recorded in the source repo (git ls-tree <rev> third-party).
   # moonlight-common-c needs fetchSubmodules: it carries a nested `enet`
@@ -164,7 +164,7 @@ stdenv'.mkDerivation (finalAttrs: {
     owner = "Biaogo";
     repo = "foundation-sunshine-linux";
     inherit rev;
-    hash = "sha256-CN0RJYUhrRI9JeT06n3lW8tPW7/DyjfeiguOlJ7Sgi0=";
+    hash = "sha256-Rwr6+L+8LFtxFDlInZAvsIdbRc7vfrwZXkBN0X9lVBw=";
   };
 
   # Web UI (vite 8 / rolldown) — engines demand node >=26.7 <27.
@@ -177,6 +177,10 @@ stdenv'.mkDerivation (finalAttrs: {
 
     installPhase = ''
       runHook preInstall
+      # npmConfigHook can leave result* convenience symlinks in the source
+      # tree; copying them into $out trips the noBrokenSymlinks hook (the
+      # openssl dev target does not exist in the build sandbox).
+      rm -f result result-* dev result-dev
       mkdir -p "$out"
       cp -a . "$out"/
       runHook postInstall

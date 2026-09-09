@@ -42,15 +42,45 @@ nix build github:Biaogo/foundation-sunshine-linux.nix
 ./result/bin/sunshine
 ```
 
-## Notes
+## Deployment notes (Linux)
 
-- CUDA/NVENC is enabled automatically when `cudaPackages` is available;
-  pass `override { cudaPackages = null; }` to build without it.
-- The KWin capture backend (`capture = kwin`) is included, so
-  [krfb-virtualmonitor](https://docs.kde.org/stable/en/kdenetwork/krfb/krfb-virtualmonitor.html)
-  virtual outputs can be streamed — useful for phone-as-second-screen setups.
+- **KMS capture (kmsgrab) needs `CAP_SYS_ADMIN`.** On NixOS use a setcap
+  wrapper (`security.wrappers.sunshine` with `cap_sys_admin+p`) and point the
+  service's `ExecStart` at `/run/wrappers/bin/sunshine`. The binary itself is
+  capability-free.
+- **KWin ScreenCast and file capabilities don't mix.** KWin ≥ 6.6 gates the
+  `zkde_screencast_unstable_v1` protocol per client by readlinking
+  `/proc/<pid>/exe`; a setcap-wrapped process is non-dumpable, so the exe is
+  unreadable and KWin refuses the protocol (`not found in registry`). The
+  practical fix is upstream's documented workaround: set
+  `KWIN_WAYLAND_NO_PERMISSION_CHECKS=1` both in the **desktop session**
+  environment (this is what KWin itself reads — e.g.
+  `environment.sessionVariables` on NixOS) and in the sunshine service
+  environment (this skips Sunshine's own permission-desktop-file handling).
+  Pre-login (SDDM) KMS streaming is unaffected either way.
+- **Virtual displays** (phone-as-second-screen): the branch's KWin capture
+  backend can stream [krfb-virtualmonitor](https://docs.kde.org/stable/en/kdenetwork/krfb/krfb-virtualmonitor.html)
+  outputs. Note the output is created DISABLED — enable it with
+  `kscreen-doctor output.<uuid>.enable` (a `global_prep_cmd` do/undo hook can
+  wire this to session start/stop), and that `--resolution` takes a single
+  `WIDTHxHEIGHT` token (no spaces).
+- **`/dev/uinput` under a linger user service**: uaccess ACLs only apply while
+  the user owns an active session, but a linger sunshine starts before login —
+  virtual mouse/keyboard then fail with Permission denied for the service's
+  lifetime. Add a static udev rule
+  (`KERNEL=="uinput", GROUP="input", MODE="0660"`) and put the user in the
+  `input` group.
 - Windows-only components (ZakoVDD virtual display driver, vmouse, vsink,
   RTX HDR) are stubbed out upstream-style and are inert on Linux.
+
+## Releases
+
+Prebuilt tarballs (x86_64-linux, built from this flake with dynamic CUDA) are
+attached to the
+[`v2026.09.07-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.09.07-linux)
+release. Nix users should prefer the flake — it wires up the full runtime
+closure (ffmpeg/boost statics, CUDA, pipewire, avahi) that a bare tarball
+cannot provide on non-NixOS distros.
 
 ## License
 
