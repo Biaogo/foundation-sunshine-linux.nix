@@ -73,6 +73,22 @@ nix build github:Biaogo/foundation-sunshine-linux.nix
 - Windows-only components (ZakoVDD virtual display driver, vmouse, vsink,
   RTX HDR) are stubbed out upstream-style and are inert on Linux.
 
+### Headless hosts & the login manager (SDDM/GDM)
+
+A dynamic virtual monitor cannot exist at the greeter: it lives inside the
+streaming user's compositor, which does not exist before login (the greeter's
+own compositor belongs to the `sddm`/`gdm` user and is unreachable across
+Wayland's socket isolation — and running Sunshine as the greeter user is a
+security anti-pattern). Pre-login the KMS backend can only stream a
+*connector*, whose modes are fixed by EDID at boot.
+
+The standard architecture: a small **static login head** (forced connector +
+custom EDID, or a `vkms` virtual DRM device) for the greeter, then the
+**dynamic krfb-virtualmonitor** takes over after login with the client's
+resolution/fps. Full walkthrough including autologin+lock, the KWin
+permission-gate workaround, and troubleshooting:
+[linux-headless-sddm-streaming.md](https://github.com/Biaogo/foundation-sunshine-linux/blob/linux-support/docs/linux-headless-sddm-streaming.md).
+
 ## Releases
 
 Prebuilt tarballs are attached to the fork's releases. The
