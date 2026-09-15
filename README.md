@@ -88,6 +88,9 @@ custom EDID, or a `vkms` virtual DRM device) for the greeter, then the
 resolution/fps. Full walkthrough including autologin+lock, the KWin
 permission-gate workaround, and troubleshooting:
 [linux-headless-sddm-streaming.md](https://github.com/Biaogo/foundation-sunshine-linux/blob/linux-support/docs/linux-headless-sddm-streaming.md).
+A complete NixOS deployment page (flake usage, module snippets, the virtual
+display hooks in full — **KDE Plasma only**) lives at
+[nixos-sunshine.md](https://github.com/Biaogo/foundation-sunshine-linux/blob/linux-support/docs/nixos-sunshine.md).
 
 ## Releases
 
