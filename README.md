@@ -95,9 +95,9 @@ display hooks in full — **KDE Plasma only**) lives at
 ## Releases
 
 Prebuilt tarballs are attached to the fork's releases. The
-[`v2026.09.07-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.09.07-linux)
-tag is force-updated to track the `linux-support` fix series (currently
-`33051b67`: virtual-display routing under dual capture sources, ambient
+[`v2026.09.10-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.09.10-linux)
+tag tracks the `linux-support` fix series (currently
+`e4dbcca1`: virtual-display routing under dual capture sources, ambient
 CAP_SYS_ADMIN shedding, KWin permission-gate workaround docs) — this pin
 follows that tag commit exactly, so the flake hash and the release tarball
 are built from the same source tree.
