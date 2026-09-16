@@ -94,14 +94,14 @@ let
       owner = "qiin2333";
       repo = "moonlight-common-c";
       rev = "31a2a4589ea926988a08ca508bb317fbfbe2a177";
-      hash = "sha256-XiF13Ds/3tiAS37IOfGmtGTkdXneeSM8eKLVnGfp04A=";
+      hash = "sha256-0Ku1yzsJTrMSmeq8FBjd6cDZnd5yvBqQlTaEqOG7sYI=";
       fetchSubmodules = true;
     };
     moonlight-audio-haptics = fetchFromGitHub {
       owner = "AlkaidLab";
       repo = "moonlight-audio-haptics";
       rev = "21aae5018e36397d45b3dffff4005c952592ec0b";
-      hash = "sha256-tK75I81TgZaid5pl8JClntmZAybNZ7F032UD6Ket6Bc=";
+      hash = "sha256-F+Z9zkpuESEYr8dTZuBYLkoA3EGo+RMqZFOT0ahWtVU=";
     };
     nanors = fetchFromGitHub {
       owner = "sleepybishop";
