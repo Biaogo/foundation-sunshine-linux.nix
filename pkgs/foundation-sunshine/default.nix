@@ -94,7 +94,7 @@ let
       owner = "qiin2333";
       repo = "moonlight-common-c";
       rev = "31a2a4589ea926988a08ca508bb317fbfbe2a177";
-      hash = "sha256-0Ku1yzsJTrMSmeq8FBjd6cDZnd5yvBqQlTaEqOG7sYI=";
+      hash = "sha256-XiF13Ds/3tiAS37IOfGmtGTkdXneeSM8eKLVnGfp04A=";
       fetchSubmodules = true;
     };
     moonlight-audio-haptics = fetchFromGitHub {
