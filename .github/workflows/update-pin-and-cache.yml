@@ -47,7 +47,10 @@ jobs:
             accept-flake-config = true
 
       - name: Install cachix CLI
-        run: nix profile install nixpkgs#cachix --print-build-logs=false
+        # No --print-build-logs here: newer Nix (2.34+) rejects the flag on
+        # `nix profile install` outright (exit 1 before anything happens),
+        # and this step builds nothing anyway, so quiet logs are pointless.
+        run: nix profile install nixpkgs#cachix
 
       - name: Resolve target tag
         id: tag

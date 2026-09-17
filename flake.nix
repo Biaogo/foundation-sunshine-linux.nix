@@ -37,12 +37,17 @@
       };
 
       checks = forAllSystems (
-        { pkgs, ... }:
+        { system, ... }:
         {
-          foundation-sunshine = pkgs.foundation-sunshine;
+          # pkgs here is a plain nixpkgs import — the package only exists on
+          # self.packages, so reference that (pkgs.foundation-sunshine breaks
+          # `nix flake check` / `nix flake show` entirely).
+          foundation-sunshine = self.packages.${system}.foundation-sunshine;
         }
       );
 
-      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
+      # forAllSystems passes { pkgs, system } — destructure, or ${system}
+      # gets a set and evaluation fails.
+      formatter = forAllSystems ({ system, ... }: nixpkgs.legacyPackages.${system}.nixfmt-tree);
     };
 }
