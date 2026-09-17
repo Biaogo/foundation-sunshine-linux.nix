@@ -106,6 +106,24 @@ Nix users should prefer the flake — it wires up the full runtime
 closure (ffmpeg/boost statics, CUDA, pipewire, avahi) that a bare tarball
 cannot provide on non-NixOS distros.
 
+## Binary cache
+
+The `foundation-sunshine` build (~40 min incl. CUDA/NVENC) is pushed to
+Cachix after every pin update. Skip the compile entirely:
+
+```bash
+cachix use biaogo        # or add the substituter + key to your nix.settings
+nix build github:Biaogo/foundation-sunshine-linux.nix
+```
+
+| | |
+|---|---|
+| Substituter | `https://biaogo.cachix.org` |
+| Public key | `biaogo.cachix.org-1:pEsKASFTETzWAVGGsjpHnq869V5KNeDOBhQahLlrPzY=` |
+
+Pushing a new build (maintainer, token scope `tx` is enough):
+`cachix push biaogo $(nix build .#foundation-sunshine --print-out-paths)`.
+
 ## License
 
 GPL-3.0-only (same as upstream Sunshine).
