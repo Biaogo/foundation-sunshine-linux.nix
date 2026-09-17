@@ -143,7 +143,15 @@ jobs:
         if: steps.tag.outputs.already-pinned == 'false'
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        run: cachix push $CACHE "${{ steps.build.outputs.out }}"
+        run: |
+          set -euo pipefail
+          # Push = binary + runtime closure; nixpkgs deps inside it are
+          # skipped automatically (already on cache.nixos.org), so only
+          # fsl-specific artifacts ever land in the cache. The web UI is a
+          # build-time-only input (not in the runtime closure) — push it
+          # explicitly so downstream builds need zero compilation.
+          UI=$(nix build .#foundation-sunshine.ui --no-link --print-out-paths | tail -1)
+          cachix push $CACHE "${{ steps.build.outputs.out }}" "$UI"
 
       - name: Commit + push the pin bump
         if: steps.tag.outputs.already-pinned == 'false'
