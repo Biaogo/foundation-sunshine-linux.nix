@@ -63,7 +63,7 @@ jobs:
             TAG="$input_tag"
           else
             TAG=$(gh api "repos/$FORK/tags?per_page=100" \
-              --jq '[.[].name | select(test("^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}-linux$"))][0]')
+              --jq '[.[].name | select(test("^v[0-9]{4}[.][0-9]{2}[.][0-9]{2}-linux$"))][0]')
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           PINNED=$(grep -oP '# tag: \K.*' pkgs/foundation-sunshine/default.nix)
