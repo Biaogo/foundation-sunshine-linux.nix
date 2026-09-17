@@ -1,0 +1,174 @@
+name: Update pin + build + push cache
+
+# Polls the fork for a new v*-linux tag, bumps the pin, builds the CPU
+# variant (CUDA is too big for a hosted runner — maintainers push it locally
+# after `nix build .#foundation-sunshine`), uploads the closure to Cachix and
+# only then commits the pin — a failing tag never corrupts this repo.
+#
+# Trigger: 30-min poll of Biaogo/foundation-sunshine-linux tags, or manual
+# workflow_dispatch (optionally with an explicit tag name).
+# No push trigger on this repo, so the final commit cannot loop anything.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to pin (default: newest v*-linux tag of the fork)"
+        required: false
+        type: string
+
+concurrency:
+  group: update-pin-and-cache
+  cancel-in-progress: false
+
+permissions:
+  contents: write # commit + push the pin bump to THIS repo
+
+env:
+  FORK: Biaogo/foundation-sunshine-linux
+  CACHE: biaogo
+
+jobs:
+  update-pin-and-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout (this repo)
+        uses: actions/checkout@v5
+
+      - name: Install Nix + cachix
+        uses: cachix/install-nix-action@v31
+        with:
+          enable_kvm: false
+          extra_nix_config: |
+            http-connections = 50
+            accept-flake-config = true
+
+      - name: Install cachix CLI
+        run: nix profile install nixpkgs#cachix --print-build-logs=false
+
+      - name: Resolve target tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          input_tag="${{ inputs.tag || '' }}"
+          if [ -n "$input_tag" ]; then
+            TAG="$input_tag"
+          else
+            TAG=$(gh api "repos/$FORK/tags?per_page=100" \
+              --jq '[.[].name | select(test("^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}-linux$"))][0]')
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          PINNED=$(grep -oP '# tag: \K.*' pkgs/foundation-sunshine/default.nix)
+          echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
+          if [ "$TAG" = "$PINNED" ]; then
+            echo "already-pinned=true" >> "$GITHUB_OUTPUT"
+            echo "$TAG already pinned — nothing to do"
+          else
+            echo "already-pinned=false" >> "$GITHUB_OUTPUT"
+            # Resolve the tag to a COMMIT sha (peel annotated tags).
+            OBJ_TYPE=$(gh api "repos/$FORK/git/ref/tags/$TAG" --jq '.object.type')
+            if [ "$OBJ_TYPE" = "tag" ]; then
+              OBJ=$(gh api "repos/$FORK/git/ref/tags/$TAG" --jq '.object.sha')
+              SHA=$(gh api "repos/$FORK/git/tags/$OBJ" --jq '.object.sha')
+            else
+              SHA=$(gh api "repos/$FORK/git/ref/tags/$TAG" --jq '.object.sha')
+            fi
+            echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+            echo "target: $TAG @ $SHA"
+          fi
+
+      - name: Skip (already current)
+        if: steps.tag.outputs.already-pinned == 'true'
+        run: |
+          echo "No new v*-linux tag since $(grep -oP '# tag: \K.*' pkgs/foundation-sunshine/default.nix) — done."
+
+      - name: Prefetch source hash
+        if: steps.tag.outputs.already-pinned == 'false'
+        id: hash
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.tag.outputs.sha }}"
+          H=$(nix store prefetch-file --json --unpack --hash-type sha256 \
+            "https://github.com/$FORK/archive/$SHA.tar.gz" | jq -r '.hash')
+          echo "hash=$H" >> "$GITHUB_OUTPUT"
+          echo "prefetched: $H"
+
+      - name: Bump pin (version / rev / hash / README)
+        if: steps.tag.outputs.already-pinned == 'false'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHA: ${{ steps.tag.outputs.sha }}
+          SRC_HASH: ${{ steps.hash.outputs.hash }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"; VERSION="${VERSION%-linux}"
+          python3 scripts/update-pin.py "$VERSION" "$TAG" "$SHA" "$SRC_HASH"
+          git --no-pager diff --stat
+
+      - name: Build (hash-fixup retry x3)
+        if: steps.tag.outputs.already-pinned == 'false'
+        id: build
+        run: |
+          set -uo pipefail
+          ok=""
+          for attempt in 1 2 3; do
+            echo "=== build attempt $attempt ==="
+            if nix build .#foundation-sunshine --no-link --print-out-paths -L \
+              > build.log 2>&1; then
+              ok=1; break
+            fi
+            if grep -q "hash mismatch in fixed-output derivation" build.log; then
+              echo "stale pin hash — auto-fixing from log and retrying"
+              python3 scripts/update-pin.py --fix-from-log build.log
+            else
+              echo "build failed (not a hash issue):"
+              tail -40 build.log
+              exit 1
+            fi
+          done
+          if [ -z "$ok" ]; then
+            echo "hash-fixup retries exhausted"; tail -40 build.log; exit 1
+          fi
+          OUT=$(grep -oE '/nix/store/[a-z0-9]+-foundation-sunshine-[^ ]+' build.log | tail -1)
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          rm -f build.log
+          echo "built: $OUT"
+
+      - name: Push closure to Cachix
+        if: steps.tag.outputs.already-pinned == 'false'
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: cachix push $CACHE "${{ steps.build.outputs.out }}"
+
+      - name: Commit + push the pin bump
+        if: steps.tag.outputs.already-pinned == 'false'
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          SHA="${{ steps.tag.outputs.sha }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "pin(sunshine): ${TAG%-linux} ($TAG @ ${SHA:0:8})
+
+          Automated: tag detected -> pin bumped -> CPU build verified ->
+          closure pushed to Cachix ($CACHE) -> committed." \
+            && git push
+          echo "committed and pushed"
+
+      - name: Summary
+        if: steps.tag.outputs.already-pinned == 'false'
+        run: |
+          {
+            echo "### foundation-sunshine pin updated"
+            echo "- tag: \`${{ steps.tag.outputs.tag }}\`"
+            echo "- commit: \`${{ steps.tag.outputs.sha }}\`"
+            echo "- source hash: \`${{ steps.hash.outputs.hash }}\`"
+            echo "- build: \`${{ steps.build.outputs.out }}\`"
+            echo "- cache: pushed closure to \`${{ env.CACHE }}.cachix.org\`"
+          } >> "$GITHUB_STEP_SUMMARY"
