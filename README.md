@@ -95,10 +95,11 @@ display hooks in full — **KDE Plasma only**) lives at
 ## Releases
 
 Prebuilt tarballs are attached to the fork's releases. The
-[`v2026.09.10-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.09.10-linux)
-tag tracks the `linux-support` fix series (currently
-`e4dbcca1`: virtual-display routing under dual capture sources, ambient
-CAP_SYS_ADMIN shedding, KWin permission-gate workaround docs) — this pin
+[`v2026.09.26-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.09.26-linux)
+tag tracks the re-forked Linux lineage (`refork/linux`: upstream/master plus the
+re-applied host patches; currently `ee837406`, which adds the in-session re-verification
+of the KWin capture source so a linger service started before the compositor no longer
+answers 503 on every display pick) — this pin
 follows that tag commit exactly, so the flake hash and the release tarball
 are built from the same source tree.
 
