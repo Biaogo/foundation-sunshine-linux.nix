@@ -60,6 +60,7 @@
   libxdmcp,
   libxkbcommon,
   libepoxy,
+  libglvnd,
   libva,
   libvdpau,
   numactl,
@@ -95,7 +96,7 @@ stdenv'.mkDerivation (finalAttrs: {
     owner = "Biaogo";
     repo = "foundation-sunshine-linux";
     inherit rev;
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    hash = "sha256-ZhoFm3OzI6tHBOpvCy/0axKpq4ki3lYk6w09RHwB6FQ=";
     # Upstream's build consumes several submodules (glad, libdisplaydevice, libvirtualhid,
     # lizardbyte-common, moonlight-common-c with its nested enet/nanors, ...). Fetching the tree
     # with its gitlinks in one go is what nixpkgs' sunshine package does.
