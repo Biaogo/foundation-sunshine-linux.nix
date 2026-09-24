@@ -104,34 +104,7 @@ are built from the same source tree.
 
 Nix users should prefer the flake — it wires up the full runtime
 closure (ffmpeg/boost statics, CUDA, pipewire, avahi) that a bare tarball
-cannot provide on non-Nix distros.
-
-### Portable tarball (non-Nix distros)
-
-The release tarballs above are raw Nix store outputs — on a host without
-Nix they fail with `bad interpreter` / `required file not found`, because
-every path (ELF interpreter, RPATH, wrapper shebangs) points into
-`/nix/store`. For those hosts, build a **relocated, self-contained
-bundle** instead:
-
-```bash
-# maintainer side (needs nix + patchelf)
-scripts/make-portable-tarball.sh [out.tar.gz] [--store-path <nix store path>]
-
-# target machine (any x86_64 distro, no Nix / no patchelf needed)
-sudo tar -C / -xzf foundation-sunshine-<version>-portable-linux-x86_64.tar.gz
-/opt/sunshine-portable/bin/sunshine
-```
-
-The script copies the full runtime closure (glibc/ld.so, boost, ffmpeg
-statics, pipewire, ...) into `/opt/sunshine-portable/nix/store`, then
-rewrites every `/nix/store` reference: text files via sed, ELF
-interpreters and RPATHs via patchelf, store symlinks re-pointed. The
-target machine needs nothing — its own glibc can even be older than the
-build host's, since 2.42 rides along. TLS uses the host CA bundle
-(`/etc/ssl/certs/ca-certificates.crt`); mDNS discovery needs
-`avahi-daemon` on the host (manual IP connect works without). Never untar
-it on a NixOS machine — use the flake there.
+cannot provide on non-NixOS distros.
 
 ## Binary cache
 
