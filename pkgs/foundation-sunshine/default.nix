@@ -77,8 +77,8 @@
   wayland-scanner,
 }:
 let
-  version = "2026.09.25";
-  rev = "b48a1cfb00ad84b66d24ecd00f3760042eba29d3"; # tag: v2026.09.25-linux
+  version = "2026.09.10";
+  rev = "e4dbcca1a25b8131583e3425d30fd5695936ca9c"; # tag: v2026.09.10-linux
 
   # Gitlink pins recorded in the source repo (git ls-tree <rev> third-party).
   # moonlight-common-c needs fetchSubmodules: it carries a nested `enet`
@@ -164,7 +164,7 @@ stdenv'.mkDerivation (finalAttrs: {
     owner = "Biaogo";
     repo = "foundation-sunshine-linux";
     inherit rev;
-    hash = "sha256-H5Pi69nipjOz1kDb0WBm3XXo1Yfz6xMHYk9yi2PPfSo=";
+    hash = "sha256-Rwr6+L+8LFtxFDlInZAvsIdbRc7vfrwZXkBN0X9lVBw=";
   };
 
   # Web UI (vite 8 / rolldown) — engines demand node >=26.7 <27.
