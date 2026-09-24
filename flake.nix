@@ -29,11 +29,15 @@
         {
           default = pkgs.callPackage ./pkgs/foundation-sunshine { };
           foundation-sunshine = pkgs.callPackage ./pkgs/foundation-sunshine { };
+          # The re-forked Linux build (LizardByte upstream + the fork's Linux patch series),
+          # see pkgs/foundation-sunshine-upstream/.
+          foundation-sunshine-upstream = pkgs.callPackage ./pkgs/foundation-sunshine-upstream { };
         }
       );
 
       overlays.default = final: prev: {
         foundation-sunshine = final.callPackage ./pkgs/foundation-sunshine { };
+        foundation-sunshine-upstream = final.callPackage ./pkgs/foundation-sunshine-upstream { };
       };
 
       checks = forAllSystems (
@@ -43,6 +47,7 @@
           # self.packages, so reference that (pkgs.foundation-sunshine breaks
           # `nix flake check` / `nix flake show` entirely).
           foundation-sunshine = self.packages.${system}.foundation-sunshine;
+          foundation-sunshine-upstream = self.packages.${system}.foundation-sunshine-upstream;
         }
       );
 

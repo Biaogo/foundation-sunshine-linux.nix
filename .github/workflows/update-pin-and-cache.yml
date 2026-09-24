@@ -66,7 +66,7 @@ jobs:
               --jq '[.[].name | select(test("^v[0-9]{4}[.][0-9]{2}[.][0-9]{2}-linux$"))][0]')
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          PINNED=$(grep -oP '# tag: \K.*' pkgs/foundation-sunshine/default.nix)
+          PINNED=$(grep -oP '# tag: \K.*' pkgs/foundation-sunshine-upstream/default.nix)
           echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
           if [ "$TAG" = "$PINNED" ]; then
             echo "already-pinned=true" >> "$GITHUB_OUTPUT"
@@ -88,7 +88,7 @@ jobs:
       - name: Skip (already current)
         if: steps.tag.outputs.already-pinned == 'true'
         run: |
-          echo "No new v*-linux tag since $(grep -oP '# tag: \K.*' pkgs/foundation-sunshine/default.nix) — done."
+          echo "No new v*-linux tag since $(grep -oP '# tag: \K.*' pkgs/foundation-sunshine-upstream/default.nix) — done."
 
       - name: Prefetch source hash
         if: steps.tag.outputs.already-pinned == 'false'
@@ -121,7 +121,7 @@ jobs:
           ok=""
           for attempt in 1 2 3; do
             echo "=== build attempt $attempt ==="
-            if nix build .#foundation-sunshine --no-link --print-out-paths -L \
+            if nix build .#foundation-sunshine-upstream --no-link --print-out-paths -L \
               > build.log 2>&1; then
               ok=1; break
             fi
@@ -137,7 +137,7 @@ jobs:
           if [ -z "$ok" ]; then
             echo "hash-fixup retries exhausted"; tail -40 build.log; exit 1
           fi
-          OUT=$(grep -oE '/nix/store/[a-z0-9]+-foundation-sunshine-[^ ]+' build.log | tail -1)
+          OUT=$(grep -oE '/nix/store/[a-z0-9]+-foundation-sunshine-upstream-[^ ]+' build.log | tail -1)
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           rm -f build.log
           echo "built: $OUT"
@@ -153,7 +153,7 @@ jobs:
           # fsl-specific artifacts ever land in the cache. The web UI is a
           # build-time-only input (not in the runtime closure) — push it
           # explicitly so downstream builds need zero compilation.
-          UI=$(nix build .#foundation-sunshine.ui --no-link --print-out-paths | tail -1)
+          UI=$(nix build .#foundation-sunshine-upstream.ui --no-link --print-out-paths | tail -1)
           cachix push $CACHE "${{ steps.build.outputs.out }}" "$UI"
 
       - name: Commit + push the pin bump

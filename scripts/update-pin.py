@@ -10,6 +10,10 @@ Every replacement is scoped and asserted — a silent partial bump aborts.
 import re
 import sys
 
+# The package this workflow pins. The re-forked Linux lineage (pkgs/foundation-sunshine-upstream)
+# replaced the AlkaidLab-based one (pkgs/foundation-sunshine), which is frozen at its last tag.
+PIN_FILE = "pkgs/foundation-sunshine-upstream/default.nix"
+
 
 def fix_from_log(log_path: str) -> None:
     """Rewrite stale pin hashes from a `nix build` hash-mismatch log.
@@ -30,7 +34,7 @@ def fix_from_log(log_path: str) -> None:
     )
     if not pairs:
         sys.exit("no specified/got hash pairs found in log — not auto-fixable")
-    fn = "pkgs/foundation-sunshine/default.nix"
+    fn = PIN_FILE
     text = open(fn).read()
     for old, new in pairs:
         for attr in ("hash", "npmDepsHash"):
@@ -61,7 +65,7 @@ def main() -> None:
         sys.exit(f"unexpected hash format: {sri_hash}")
 
     # --- default.nix: version / rev / main-src hash -----------------------
-    fn = "pkgs/foundation-sunshine/default.nix"
+    fn = PIN_FILE
     text = open(fn).read()
 
     old_version = None
