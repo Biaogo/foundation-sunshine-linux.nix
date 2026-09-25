@@ -18,6 +18,11 @@ on:
         description: "Tag to pin (default: newest v*-linux tag of the fork)"
         required: false
         type: string
+      force:
+        description: "Run build + cache push even if the pin is already current (cache repair)"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: update-pin-and-cache
@@ -114,7 +119,7 @@ jobs:
           git --no-pager diff --stat
 
       - name: Build (hash-fixup retry x3)
-        if: steps.tag.outputs.already-pinned == 'false'
+        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         id: build
         run: |
           set -uo pipefail
@@ -143,7 +148,7 @@ jobs:
           echo "built: $OUT"
 
       - name: Push closure to Cachix
-        if: steps.tag.outputs.already-pinned == 'false'
+        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
@@ -165,7 +170,7 @@ jobs:
           cachix push $CACHE "${{ steps.build.outputs.out }}" "$UI" "$SRC"
 
       - name: Commit + push the pin bump
-        if: steps.tag.outputs.already-pinned == 'false'
+        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         run: |
           set -euo pipefail
           TAG="${{ steps.tag.outputs.tag }}"
@@ -173,6 +178,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
+          if git diff --cached --quiet; then
+            echo "nothing to commit (forced cache-refresh run)"
+            exit 0
+          fi
           git commit -m "pin(sunshine): ${TAG%-linux} ($TAG @ ${SHA:0:8})
 
           Automated: tag detected -> pin bumped -> CPU build verified ->
@@ -181,7 +190,7 @@ jobs:
           echo "committed and pushed"
 
       - name: Summary
-        if: steps.tag.outputs.already-pinned == 'false'
+        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         run: |
           {
             echo "### foundation-sunshine pin updated"
