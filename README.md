@@ -95,7 +95,7 @@ display hooks in full — **KDE Plasma only**) lives at
 ## Releases
 
 Prebuilt tarballs are attached to the fork's releases. The
-[`v2026.09.30-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.09.30-linux)
+[`v2026.10.01-linux`](https://github.com/Biaogo/foundation-sunshine-linux/releases/tag/v2026.10.01-linux)
 tag tracks the re-forked Linux lineage (`refork/linux`: upstream/master plus the
 re-applied host patches; currently `ee837406`, which adds the in-session re-verification
 of the KWin capture source so a linger service started before the compositor no longer
