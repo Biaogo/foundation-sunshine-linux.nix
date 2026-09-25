@@ -76,8 +76,8 @@
   cudaPackages ? null,
 }:
 let
-  version = "2026.09.26";
-  rev = "ee83740632931cf72fae6bd0e608350722bd633c"; # tag: v2026.09.26-linux
+  version = "2026.09.27";
+  rev = "a26e598b131de45870f167b2ae31a80408152a13"; # tag: v2026.09.27-linux
 
   # Upstream's cmake downloads a prebuilt ffmpeg from LizardByte/build-deps at configure time; the
   # tag has to match the commit pinned in third-party/build-deps.
@@ -96,7 +96,7 @@ stdenv'.mkDerivation (finalAttrs: {
     owner = "Biaogo";
     repo = "foundation-sunshine-linux";
     inherit rev;
-    hash = "sha256-6O3HsxiuDYbd9OD8fXLxtZ8oeS7FQTBfDR4q9VCH+K4=";
+    hash = "sha256-1ikN2FR7Kjl4ac8aQzV+NWlEhjTgzJTMSbQ41j1jNAQ=";
     # Upstream's build consumes several submodules (glad, libdisplaydevice, libvirtualhid,
     # lizardbyte-common, moonlight-common-c with its nested enet/nanors, ...). Fetching the tree
     # with its gitlinks in one go is what nixpkgs' sunshine package does.
