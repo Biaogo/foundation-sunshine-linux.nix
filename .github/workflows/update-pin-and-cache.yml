@@ -154,7 +154,15 @@ jobs:
           # build-time-only input (not in the runtime closure) — push it
           # explicitly so downstream builds need zero compilation.
           UI=$(nix build .#foundation-sunshine-upstream.ui --no-link --print-out-paths | tail -1)
-          cachix push $CACHE "${{ steps.build.outputs.out }}" "$UI"
+          # The git source tree is the single most fragile input of this build:
+          # `fetchSubmodules = true` makes Nix clone ~20 repos recursively, and
+          # any TLS hiccup anywhere in that graph fails the whole derivation.
+          # Runners have clean network, so fetch it once here and publish it —
+          # downstream builds (including the NixOS host that installs this) then
+          # substitute it instead of re-cloning the world.
+          SRC=$(nix eval --raw .#foundation-sunshine-upstream.src.outPath)
+          nix-store --realise "$SRC"
+          cachix push $CACHE "${{ steps.build.outputs.out }}" "$UI" "$SRC"
 
       - name: Commit + push the pin bump
         if: steps.tag.outputs.already-pinned == 'false'
