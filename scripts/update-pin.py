@@ -57,7 +57,7 @@ def main() -> None:
     if len(sys.argv) != 5:
         sys.exit(f"usage: {sys.argv[0]} <version> <tag> <full-sha> <sri-hash>")
     version, tag, sha, sri_hash = sys.argv[1:5]
-    if not re.fullmatch(r"v\d{4}\.\d{2}\.\d{2}-linux", tag):
+    if not re.fullmatch(r"v\d{4}\.\d{2}\.\d{2}(?:\.\d+)?-linux", tag):
         sys.exit(f"unexpected tag format: {tag}")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         sys.exit(f"unexpected sha format: {sha}")
@@ -104,9 +104,9 @@ def main() -> None:
     # --- README: releases section (tag refs + tracked sha) -----------------
     rn = "README.md"
     rt = open(rn).read()
-    rt, n1 = re.subn(r"v\d{4}\.\d{2}\.\d{2}-linux`", f"{tag}`", rt, count=1)
+    rt, n1 = re.subn(r"v\d{4}\.\d{2}\.\d{2}(?:\.\d+)?-linux`", f"{tag}`", rt, count=1)
     rt, n2 = re.subn(
-        r"releases/tag/v\d{4}\.\d{2}\.\d{2}-linux", f"releases/tag/{tag}", rt
+        r"releases/tag/v\d{4}\.\d{2}\.\d{2}(?:\.\d+)?-linux", f"releases/tag/{tag}", rt
     )
     rt, n3 = re.subn(r"`[0-9a-f]{8}`(?=: )", f"`{sha[:8]}`", rt, count=1)
     if not (n1 and n2 and n3):

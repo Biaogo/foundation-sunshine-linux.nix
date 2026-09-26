@@ -67,8 +67,20 @@ jobs:
           if [ -n "$input_tag" ]; then
             TAG="$input_tag"
           else
-            TAG=$(gh api "repos/$FORK/tags?per_page=100" \
-              --jq '[.[].name | select(test("^v[0-9]{4}[.][0-9]{2}[.][0-9]{2}-linux$"))][0]')
+            # Pick by REAL creation time, not by name order. The fork's tag names can carry a
+            # same-day suffix (v2026.09.26.1-linux) and a tag created today may well bear an
+            # earlier date than one pushed yesterday — the REST /tags endpoint returns name
+            # order, which silently picks the wrong one. A blobless bare clone costs a few
+            # seconds and gives real tag dates; only v<date>[.<n>]-linux names are considered.
+            rm -rf /tmp/fork-tags.git
+            git clone --quiet --bare --filter=blob:none "https://github.com/$FORK.git" /tmp/fork-tags.git
+            TAG=$(git -C /tmp/fork-tags.git for-each-ref --sort=-creatordate \
+                    --format='%(refname:short)' 'refs/tags/v*-linux' \
+                  | grep -E '^v[0-9]{4}[.][0-9]{2}[.][0-9]{2}([.][0-9]+)?-linux$' | head -1)
+            if [ -z "$TAG" ]; then
+              echo "no v<date>-linux tag found in $FORK" >&2
+              exit 1
+            fi
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           PINNED=$(grep -oP '# tag: \K.*' pkgs/foundation-sunshine-upstream/default.nix)
