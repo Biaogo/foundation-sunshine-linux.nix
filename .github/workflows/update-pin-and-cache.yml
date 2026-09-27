@@ -174,6 +174,13 @@ jobs:
       - name: Build (hash-fixup retry x3)
         if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         id: build
+        env:
+          # Needed by the post-build hash normalisation below. `set -u` is on:
+          # any variable that is not declared here or assigned in the script
+          # aborts the step (2026-09: `TAG: unbound variable` killed a step whose
+          # build had already succeeded).
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHA: ${{ steps.tag.outputs.sha }}
         run: |
           set -euo pipefail
           ok=""
