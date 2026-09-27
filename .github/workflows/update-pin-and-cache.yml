@@ -91,10 +91,17 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           PINNED=$(grep -oP '# tag: \K.*' pkgs/foundation-sunshine-upstream/default.nix)
+          PINNED_SHA=$(grep -oP '^  rev = "\K[0-9a-f]{40}' pkgs/foundation-sunshine-upstream/default.nix)
           echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
           if [ "$TAG" = "$PINNED" ]; then
             echo "already-pinned=true" >> "$GITHUB_OUTPUT"
-            echo "$TAG already pinned — nothing to do"
+            # Emit the CURRENT pin's sha too: a `force` run (cache / hash repair)
+            # still builds and pushes that pin, and the prefetch step needs a
+            # real sha — leaving it empty produced
+            # `.../archive/.tar.gz` → HTTP 404 (2026-09 hit, forced run).
+            test -n "$PINNED_SHA" || { echo "no rev= in default.nix"; exit 1; }
+            echo "sha=$PINNED_SHA" >> "$GITHUB_OUTPUT"
+            echo "$TAG already pinned — nothing to do (sha ${PINNED_SHA:0:8})"
           else
             echo "already-pinned=false" >> "$GITHUB_OUTPUT"
             # Resolve the tag to a COMMIT sha (peel annotated tags).
@@ -120,6 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           SHA="${{ steps.tag.outputs.sha }}"
+          test -n "$SHA" || { echo "no sha resolved by the tag step — refusing to build a bogus URL"; exit 1; }
           # FIRST GUESS ONLY, and it is deliberately cheap: this hashes the
           # plain codeload tarball, which excludes submodules, while the package
           # fetches with `fetchSubmodules = true` — so this value can never
@@ -127,10 +135,22 @@ jobs:
           # (`nix hash path --sri` on the realised FOD) before anything is
           # committed. Kept because it is instant and gives the retry loop a
           # realistic starting point.
-          H=$(nix store prefetch-file --json --unpack --hash-type sha256 \
-            "https://github.com/$FORK/archive/$SHA.tar.gz" | jq -r '.hash')
+          #
+          # Exception: a repair run (`force`) on an already-realised pin must NOT
+          # write that placeholder over a good hash and then wait for a build
+          # failure to repair it — nix already knows the answer locally, so take
+          # it directly and keep the pin untouched.
+          if [ "${{ steps.tag.outputs.already-pinned }}" = 'true' ] \
+             && P=$(nix eval --raw .#foundation-sunshine-upstream.src.outPath 2>/dev/null) \
+             && [ -e "$P" ]; then
+            H=$(nix hash path --sri "$P")
+            echo "reused realised FOD ($P) — hash taken from nix, not from codeload"
+          else
+            H=$(nix store prefetch-file --json --unpack --hash-type sha256 \
+              "https://github.com/$FORK/archive/$SHA.tar.gz" | jq -r '.hash')
+            echo "prefetched (codeload, subs excluded — placeholder): $H"
+          fi
           echo "hash=$H" >> "$GITHUB_OUTPUT"
-          echo "prefetched (codeload, subs excluded — placeholder): $H"
 
       - name: Bump pin (version / rev / hash / README)
         if: steps.tag.outputs.already-pinned == 'false' || inputs.force
@@ -221,7 +241,7 @@ jobs:
           # substitute it instead of re-cloning the world.
           SRC=$(nix eval --raw .#foundation-sunshine-upstream.src.outPath)
           nix-store --realise "$SRC"
-          cachix push $CACHE "$OUT" "$UI" "$SRC"
+          cachix push "$CACHE" "$OUT" "$UI" "$SRC"
 
           # Self-check: a "pushed" closure that is not readable back from the
           # cache must turn the job RED (cachix only warns on a skipped path).
