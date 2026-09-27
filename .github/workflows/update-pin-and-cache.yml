@@ -1,12 +1,19 @@
 name: Update pin + build + push cache
 
-# Polls the fork for a new v*-linux tag, bumps the pin, builds the CPU
-# variant (CUDA is too big for a hosted runner — maintainers push it locally
-# after `nix build .#foundation-sunshine`), uploads the closure to Cachix and
-# only then commits the pin — a failing tag never corrupts this repo.
+# Polls the fork for a new v*-linux tag, bumps the pin, builds
+# `.#foundation-sunshine-upstream`, uploads the closure (+ the web UI and the
+# source FOD) to Cachix and only then commits the pin — a failing tag never
+# corrupts this repo.
+#
+# The build is the CUDA/NVENC variant: the package takes `cudaPackages ? null`
+# and `callPackage` fills that in from pkgs, so CUDA is on in this flake's own
+# evaluation (verified: -DSUNSHINE_ENABLE_CUDA:BOOL=TRUE). An earlier version of
+# this comment claimed otherwise — do not "optimise" it by passing
+# `cudaPackages = null`, that would silently drop NVENC from the cache.
 #
 # Trigger: 30-min poll of Biaogo/foundation-sunshine-linux tags, or manual
-# workflow_dispatch (optionally with an explicit tag name).
+# workflow_dispatch (optionally with an explicit tag name; `force` also
+# repairs the cache for an already-current pin).
 # No push trigger on this repo, so the final commit cannot loop anything.
 
 on:
@@ -134,7 +141,7 @@ jobs:
         if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         id: build
         run: |
-          set -uo pipefail
+          set -euo pipefail
           ok=""
           for attempt in 1 2 3; do
             echo "=== build attempt $attempt ==="
@@ -154,7 +161,10 @@ jobs:
           if [ -z "$ok" ]; then
             echo "hash-fixup retries exhausted"; tail -40 build.log; exit 1
           fi
+          # `set -e` is ON: an empty extraction or an unwritable $GITHUB_OUTPUT
+          # must fail the job here, never be handed on as an empty argument.
           OUT=$(grep -oE '/nix/store/[a-z0-9]+-foundation-sunshine-upstream-[^ ]+' build.log | tail -1)
+          test -n "$OUT" || { echo "could not extract the built out path from build.log"; exit 1; }
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           rm -f build.log
           echo "built: $OUT"
@@ -167,9 +177,20 @@ jobs:
           set -euo pipefail
           # Push = binary + runtime closure; nixpkgs deps inside it are
           # skipped automatically (already on cache.nixos.org), so only
-          # fsl-specific artifacts ever land in the cache. The web UI is a
-          # build-time-only input (not in the runtime closure) — push it
-          # explicitly so downstream builds need zero compilation.
+          # fsl-specific artifacts ever land in the cache.
+          #
+          # Derive the path HERE instead of trusting a cross-step output:
+          # 2026-09 a run pushed `$CACHE "" "$UI" "$SRC"` (the first argument
+          # expanded to an empty string), cachix resolved it to the work dir,
+          # only WARNED, and the job stayed green while the main closure never
+          # reached the cache. Build is cached at this point, so re-asking nix
+          # costs nothing.
+          OUT=$(nix build .#foundation-sunshine-upstream --no-link --print-out-paths | tail -1)
+          test -n "$OUT" || { echo "empty out path — refusing to push"; exit 1; }
+          # The web UI is a build-time-only input (not in the runtime closure) —
+          # push it explicitly so downstream builds need zero compilation. The
+          # path is checked into the store as well, so the main package does not
+          # lose it in between.
           UI=$(nix build .#foundation-sunshine-upstream.ui --no-link --print-out-paths | tail -1)
           # The git source tree is the single most fragile input of this build:
           # `fetchSubmodules = true` makes Nix clone ~20 repos recursively, and
@@ -179,7 +200,19 @@ jobs:
           # substitute it instead of re-cloning the world.
           SRC=$(nix eval --raw .#foundation-sunshine-upstream.src.outPath)
           nix-store --realise "$SRC"
-          cachix push $CACHE "${{ steps.build.outputs.out }}" "$UI" "$SRC"
+          cachix push $CACHE "$OUT" "$UI" "$SRC"
+
+          # Self-check: a "pushed" closure that is not readable back from the
+          # cache must turn the job RED (cachix only warns on a skipped path).
+          # The key is public; it is passed explicitly because the runner has no
+          # biaogo.cachix.org key configured.
+          for p in "$OUT" "$UI" "$SRC"; do
+            nix path-info --store "https://$CACHE.cachix.org" \
+              --option extra-trusted-public-keys "biaogo.cachix.org-1:pEsKASFTETzWAVGGsjpHnq869V5KNeDOBhQahLlrPzY=" \
+              "$p" >/dev/null \
+              || { echo "cache self-check FAILED — not substitutable: $p"; exit 1; }
+          done
+          echo "cache self-check OK for $OUT"
 
       - name: Commit + push the pin bump
         if: steps.tag.outputs.already-pinned == 'false' || inputs.force

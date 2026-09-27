@@ -109,21 +109,45 @@ cannot provide on non-NixOS distros.
 
 ## Binary cache
 
-The `foundation-sunshine` build (~40 min incl. CUDA/NVENC) is pushed to
-Cachix after every pin update. Skip the compile entirely:
+CI (`.github/workflows/update-pin-and-cache.yml`) builds
+`.#foundation-sunshine-upstream` and pushes **three** paths to Cachix after
+every pin update: the package closure, the web UI (`…-ui-<ver>`, a
+build-time-only input) and the git source FOD (`fetchSubmodules = true` clones
+~20 repos, so publishing it saves downstream builds the fragile part). The
+build is the CUDA/NVENC variant — `cudaPackages ? null` gets filled in by
+`callPackage`, giving `-DSUNSHINE_ENABLE_CUDA:BOOL=TRUE` in this flake's own
+evaluation.
+
+Skip the compile entirely:
 
 ```bash
 cachix use biaogo        # or add the substituter + key to your nix.settings
 nix build github:Biaogo/foundation-sunshine-linux.nix
 ```
 
+**Cache-key caveat:** a Nix cache is keyed by derivation, not by package name.
+Substitution only hits when you build this expression with **this repo's own
+nixpkgs pin** — i.e. through the flake (`nix build github:…`, or
+`inputs.<fsl>.packages.<system>.foundation-sunshine-upstream`). A consumer that
+re-`callPackage`s the expression against its *own* nixpkgs revision produces a
+different derivation (different deps) and will always miss, ending up with a
+local build. If you control the consumer, consume the flake output.
+
 | | |
 |---|---|
 | Substituter | `https://biaogo.cachix.org` |
 | Public key | `biaogo.cachix.org-1:pEsKASFTETzWAVGGsjpHnq869V5KNeDOBhQahLlrPzY=` |
 
-Pushing a new build (maintainer, token scope `tx` is enough):
-`cachix push biaogo $(nix build .#foundation-sunshine --print-out-paths)`.
+Cache repair / manual push (maintainer, token scope `tx` is enough) — the
+workflow does this itself and verifies each path reads back from the cache:
+
+```bash
+OUT=$(nix build .#foundation-sunshine-upstream --no-link --print-out-paths)
+cachix push biaogo "$OUT" \
+  "$(nix build .#foundation-sunshine-upstream.ui --no-link --print-out-paths)" \
+  "$(nix eval --raw .#foundation-sunshine-upstream.src.outPath)"
+```
+
 
 ## License
 
