@@ -115,18 +115,25 @@ jobs:
           echo "No new v*-linux tag since $(grep -oP '# tag: \K.*' pkgs/foundation-sunshine-upstream/default.nix) — done."
 
       - name: Prefetch source hash
-        if: steps.tag.outputs.already-pinned == 'false'
+        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         id: hash
         run: |
           set -euo pipefail
           SHA="${{ steps.tag.outputs.sha }}"
+          # FIRST GUESS ONLY, and it is deliberately cheap: this hashes the
+          # plain codeload tarball, which excludes submodules, while the package
+          # fetches with `fetchSubmodules = true` — so this value can never
+          # match the final pin. The Build step replaces it with nix's own value
+          # (`nix hash path --sri` on the realised FOD) before anything is
+          # committed. Kept because it is instant and gives the retry loop a
+          # realistic starting point.
           H=$(nix store prefetch-file --json --unpack --hash-type sha256 \
             "https://github.com/$FORK/archive/$SHA.tar.gz" | jq -r '.hash')
           echo "hash=$H" >> "$GITHUB_OUTPUT"
-          echo "prefetched: $H"
+          echo "prefetched (codeload, subs excluded — placeholder): $H"
 
       - name: Bump pin (version / rev / hash / README)
-        if: steps.tag.outputs.already-pinned == 'false'
+        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           SHA: ${{ steps.tag.outputs.sha }}
@@ -166,6 +173,20 @@ jobs:
           OUT=$(grep -oE '/nix/store/[a-z0-9]+-foundation-sunshine-upstream-[^ ]+' build.log | tail -1)
           test -n "$OUT" || { echo "could not extract the built out path from build.log"; exit 1; }
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
+
+          # Pin the source hash to nix's OWN value, never to a grep of the log
+          # and never to the prefetch guess: `src` uses fetchSubmodules = true,
+          # so the codeload prefetch above is always a different (smaller) tree.
+          # nix has the FOD realised by now; hashing it reproduces exactly the
+          # `hash =` attr of fetchFromGitHub (verified 2026-09: nix hash path
+          # --sri <src> == the pinned SRI for the same rev). update-pin.py is
+          # idempotent, so this also covers runs where the retry already fixed it.
+          VERSION="${TAG#v}"; VERSION="${VERSION%-linux}"
+          H=$(nix hash path --sri "$(nix eval --raw .#foundation-sunshine-upstream.src.outPath)")
+          python3 scripts/update-pin.py "$VERSION" "$TAG" "$SHA" "$H"
+          echo "$H" > "$RUNNER_TEMP/src-hash.txt"
+          echo "source hash (from nix): $H"
+
           rm -f build.log
           echo "built: $OUT"
 
@@ -229,7 +250,7 @@ jobs:
           fi
           git commit -m "pin(sunshine): ${TAG%-linux} ($TAG @ ${SHA:0:8})
 
-          Automated: tag detected -> pin bumped -> CPU build verified ->
+          Automated: tag detected -> pin bumped -> CUDA/NVENC build verified ->
           closure pushed to Cachix ($CACHE) -> committed." \
             && git push
           echo "committed and pushed"
@@ -241,7 +262,7 @@ jobs:
             echo "### foundation-sunshine pin updated"
             echo "- tag: \`${{ steps.tag.outputs.tag }}\`"
             echo "- commit: \`${{ steps.tag.outputs.sha }}\`"
-            echo "- source hash: \`${{ steps.hash.outputs.hash }}\`"
+            echo "- source hash: \`$(cat "$RUNNER_TEMP/src-hash.txt" 2>/dev/null || echo 'n/a (build step skipped)')\`"
             echo "- build: \`${{ steps.build.outputs.out }}\`"
             echo "- cache: pushed closure to \`${{ env.CACHE }}.cachix.org\`"
           } >> "$GITHUB_STEP_SUMMARY"
