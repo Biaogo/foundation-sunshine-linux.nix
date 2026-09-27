@@ -118,6 +118,32 @@ build is the CUDA/NVENC variant — `cudaPackages ? null` gets filled in by
 `callPackage`, giving `-DSUNSHINE_ENABLE_CUDA:BOOL=TRUE` in this flake's own
 evaluation.
 
+The cache is the **free 5 GB tier** and one pin's three paths already take
+~3.2 GiB (UI 1.66 + source 1.48 + closure ≈ 0.03). A push on its own is
+therefore *not* durable: with the cache near its cap the collector evicted a
+freshly pushed closure minutes after the job's own self-check had passed. So
+the workflow **pins** every path after confirming it reads back —
+`fsl-closure` with `--keep-revisions 3`, `fsl-ui` and `fsl-src` with
+`--keep-revisions 1` — because pinned paths are immune to garbage collection
+while the retention flags still let the previous generation be freed. A
+`cachix pin … failed` warning in the log means that path stayed GC-able: check
+the token scope and plan limits at app.cachix.org.
+
+**Pruning is dashboard-only** — the CLI ships no delete/gc command (`cachix`
+has push / pin / import / watch-store; `remove` only edits your local
+nix.conf). To shrink the cache:
+
+- `https://app.cachix.org/cache/biaogo/pins` — inspect and delete pins;
+  deleting one makes its store paths collectable again
+- the cache's *Garbage Collection* page — shows exactly which paths would be
+  deleted first when the limit is reached
+- search a store path and delete it directly
+
+Two documented traps that make "just push it again" a bad strategy: pushing a
+path does **not** override an existing entry (it must be deleted first), and GC
+running *while* a push is in flight surfaces `InvalidPath` errors — which is why
+the important paths are pinned instead of re-pushed.
+
 Skip the compile entirely:
 
 ```bash
@@ -138,14 +164,26 @@ local build. If you control the consumer, consume the flake output.
 | Substituter | `https://biaogo.cachix.org` |
 | Public key | `biaogo.cachix.org-1:pEsKASFTETzWAVGGsjpHnq869V5KNeDOBhQahLlrPzY=` |
 
-Cache repair / manual push (maintainer, token scope `tx` is enough) — the
-workflow does this itself and verifies each path reads back from the cache:
+Cache repair / manual push (maintainer) — the workflow does this itself,
+verifies each path reads back, and then pins all three:
 
 ```bash
 OUT=$(nix build .#foundation-sunshine-upstream --no-link --print-out-paths)
-cachix push biaogo "$OUT" \
-  "$(nix build .#foundation-sunshine-upstream.ui --no-link --print-out-paths)" \
-  "$(nix eval --raw .#foundation-sunshine-upstream.src.outPath)"
+UI=$(nix build .#foundation-sunshine-upstream.ui --no-link --print-out-paths)
+SRC=$(nix eval --raw .#foundation-sunshine-upstream.src.outPath)
+nix-store --realise "$SRC"
+
+cachix push biaogo "$OUT" "$UI" "$SRC"
+
+# A push that is not readable back is a push that did not happen.
+for p in "$OUT" "$UI" "$SRC"; do
+  nix path-info --store https://biaogo.cachix.org "$p" >/dev/null || echo "MISS: $p"
+done
+
+# Pins are what make it survive the collector (see above).
+cachix pin biaogo fsl-closure "$OUT" --keep-revisions 3
+cachix pin biaogo fsl-ui      "$UI"  --keep-revisions 1
+cachix pin biaogo fsl-src     "$SRC" --keep-revisions 1
 ```
 
 

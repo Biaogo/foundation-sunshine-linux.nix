@@ -5,6 +5,13 @@ name: Update pin + build + push cache
 # source FOD) to Cachix and only then commits the pin — a failing tag never
 # corrupts this repo.
 #
+# Cache policy (free 5 GB tier): the three pushed paths (~3.2 GiB per pin) are
+# PINNED with retention after the self-check, because an unpinned push is only
+# "in the cache" until the collector runs — a freshly pushed closure was
+# observed to disappear minutes after a green self-check. The source hash is
+# always taken from nix (`nix hash path --sri` on the realised FOD), never from
+# the codeload prefetch guess, which cannot include submodules.
+#
 # The build is the CUDA/NVENC variant: the package takes `cudaPackages ? null`
 # and `callPackage` fills that in from pkgs, so CUDA is on in this flake's own
 # evaluation (verified: -DSUNSHINE_ENABLE_CUDA:BOOL=TRUE). An earlier version of
@@ -190,8 +197,14 @@ jobs:
           fi
           # `set -e` is ON: an empty extraction or an unwritable $GITHUB_OUTPUT
           # must fail the job here, never be handed on as an empty argument.
-          OUT=$(grep -oE '/nix/store/[a-z0-9]+-foundation-sunshine-upstream-[^ ]+' build.log | tail -1)
-          test -n "$OUT" || { echo "could not extract the built out path from build.log"; exit 1; }
+          # Ask NIX, don't parse the log: `nix build -L` output can contain NUL
+          # bytes, and `grep -o` then prints "binary file matches" with NO match
+          # line (2026-09: a build that had just SUCCEEDED turned the step red).
+          OUT=$(nix build .#foundation-sunshine-upstream --no-link --print-out-paths 2>/dev/null | tail -1 || true)
+          if [ -z "$OUT" ]; then
+            OUT=$(grep -aoE '/nix/store/[a-z0-9]+-foundation-sunshine-upstream-[^ ]+' build.log | tail -1 || true)
+          fi
+          test -n "$OUT" || { echo "could not determine the built out path (nix re-ask and log fallback both empty)"; exit 1; }
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
 
           # Pin the source hash to nix's OWN value, never to a grep of the log
@@ -254,6 +267,26 @@ jobs:
               || { echo "cache self-check FAILED — not substitutable: $p"; exit 1; }
           done
           echo "cache self-check OK for $OUT"
+
+          # PIN the three paths, WITH RETENTION — a green push + self-check is
+          # NOT enough on the free tier: this cache (5 GB cap) was at 4.8 GiB and
+          # the collector removed a freshly pushed closure minutes after the
+          # self-check had passed (observed 2026-09). One pin already costs
+          # ~3.2 GiB (UI 1.66 + source 1.48 + closure), so without pins the next
+          # push can evict the very thing you just built. Pinned paths are immune
+          # to GC; --keep-revisions bounds what a pin holds forever, so the
+          # previous generation is still freeable.
+          # Best-effort: a plan that refuses pins must not fail the pin pipeline,
+          # but it must be LOUD in the log.
+          pin() {
+            local name="$1"; shift
+            cachix pin "$CACHE" "$name" "$@" \
+              || echo "::warning::cachix pin $name failed (token scope or plan limit?) — is still GC-able"
+          }
+          pin fsl-closure "$OUT" --keep-revisions 3
+          pin fsl-ui      "$UI"  --keep-revisions 1
+          pin fsl-src     "$SRC" --keep-revisions 1
+          echo "pinned (retention): fsl-closure=3 revs, fsl-ui=1 rev, fsl-src=1 rev"
 
       - name: Commit + push the pin bump
         if: steps.tag.outputs.already-pinned == 'false' || inputs.force
