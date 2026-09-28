@@ -159,6 +159,30 @@ re-`callPackage`s the expression against its *own* nixpkgs revision produces a
 different derivation (different deps) and will always miss, ending up with a
 local build. If you control the consumer, consume the flake output.
 
+### Aligning the lock with the host (url stays `nixos-unstable`)
+
+`inputs.nixpkgs.url` is only a branch name — what a build actually uses is the
+`rev` recorded in `flake.lock`, and nothing moves that automatically. This repo
+sat on the 2026-09-08 rev while the host moved to 2026-09-26, so CI built a
+derivation the host never substitutes. Align the **lock** (flake.nix untouched):
+
+```bash
+./scripts/align-lock.sh            # report only
+./scripts/align-lock.sh --apply    # rewrite flake.lock, nothing else
+./scripts/align-lock.sh --push     # commit + push → CI poll rebuilds + republishes
+```
+
+Measured after aligning: `nix eval --raw .#foundation-sunshine-upstream.drvPath`
+= `q0yhzi9n1ax6s2z8zisfl1m9fi002dha-…drv` — identical to the host's, i.e. the
+cache now hits for the host. Do **not** read the host's rev with
+`grep '"nixpkgs"' flake.lock`: a lock file holds several nixpkgs nodes (the host
+has a second one shared by `llm-agents`), and you would pick the wrong one. The
+script follows `root.inputs.nixpkgs` to the node the host really uses.
+
+Caveat: `nix flake update` in *this* repo moves the lock to the branch tip and
+re-introduces the drift — re-run the script afterwards, or simply don't update
+here (the host's rev is the useful "latest").
+
 | | |
 |---|---|
 | Substituter | `https://biaogo.cachix.org` |

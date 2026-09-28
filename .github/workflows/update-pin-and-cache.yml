@@ -64,6 +64,14 @@ jobs:
           extra_nix_config: |
             http-connections = 50
             accept-flake-config = true
+            # Required now that flake.lock is aligned with the host: this
+            # package's dependency closure contains ~126 CUDA-flavoured paths
+            # (unfree — Hydra never builds them) and 0/126 are on
+            # cache.nixos.org, while all 126 are on cache.nixos-cuda.org. Without
+            # this substituter the runner has to compile them (ffmpeg-with-CUDA
+            # among them) and the 90-min timeout is at risk.
+            extra-substituters = https://cache.nixos-cuda.org
+            extra-trusted-public-keys = cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M=
 
       - name: Install cachix CLI
         # No --print-build-logs here: newer Nix (2.34+) rejects the flag on
