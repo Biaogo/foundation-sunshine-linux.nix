@@ -20,7 +20,16 @@ name: Update pin + build + push cache
 #
 # Trigger: 30-min poll of Biaogo/foundation-sunshine-linux tags, or manual
 # workflow_dispatch (optionally with an explicit tag name; `force` also
-# repairs the cache for an already-current pin).
+# repairs the cache for an already-current pin; `bump_nixpkgs=false` skips the
+# nixpkgs refresh on a manual run).
+#
+# Every run first moves flake.lock to the tip of nixos-unstable (skipped with
+# `bump_nixpkgs=false`). A move changes the derivation, so the expensive half
+# runs even when the tag is unchanged: a single `Plan` step decides, and
+# everything below it is gated on that decision. The host consumes this repo's
+# packages output verbatim, so the rev published here is the rev it asks for —
+# see README "How the host consumes this repo".
+#
 # No push trigger on this repo, so the final commit cannot loop anything.
 
 on:
@@ -36,6 +45,11 @@ on:
         description: "Run build + cache push even if the pin is already current (cache repair)"
         required: false
         default: false
+        type: boolean
+      bump_nixpkgs:
+        description: "Also move flake.lock to the latest nixos-unstable (scheduled runs always do this)"
+        required: false
+        default: true
         type: boolean
 
 concurrency:
@@ -64,12 +78,11 @@ jobs:
           extra_nix_config: |
             http-connections = 50
             accept-flake-config = true
-            # Required now that flake.lock is aligned with the host: this
-            # package's dependency closure contains ~126 CUDA-flavoured paths
-            # (unfree — Hydra never builds them) and 0/126 are on
-            # cache.nixos.org, while all 126 are on cache.nixos-cuda.org. Without
-            # this substituter the runner has to compile them (ffmpeg-with-CUDA
-            # among them) and the 90-min timeout is at risk.
+            # This package's dependency closure contains ~126 CUDA-flavoured
+            # paths (unfree — Hydra never builds them): 0/126 are on
+            # cache.nixos.org, all 126 are on cache.nixos-cuda.org. Without this
+            # substituter the runner compiles CUDA from source and the 90-min
+            # timeout is at risk.
             extra-substituters = https://cache.nixos-cuda.org
             extra-trusted-public-keys = cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M=
 
@@ -78,6 +91,37 @@ jobs:
         # `nix profile install` outright (exit 1 before anything happens),
         # and this step builds nothing anyway, so quiet logs are pointless.
         run: nix profile install nixpkgs#cachix
+
+      - name: Refresh nixpkgs (track nixos-unstable)
+        id: lock
+        # The host consumes this repo's packages output verbatim (no
+        # nixpkgs.follows on its side), so this repo decides which rev the host
+        # asks for — that is why following the branch tip is safe here and why
+        # the cache keeps hitting (see README "How the host consumes this repo").
+        # Scheduled runs always bump; a manual run can switch it off with the
+        # `bump_nixpkgs` checkbox. No-op when the branch has not moved.
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.bump_nixpkgs }}" = 'false' ]; then
+            echo "bump_nixpkgs=false — leaving flake.lock alone"
+            exit 0
+          fi
+
+          # Follow root.inputs.nixpkgs, never `nodes.nixpkgs`: a lock file can
+          # hold several nixpkgs nodes and guessing the name picks the wrong one.
+          # (Keep the python on ONE line — a wrapped `-c` picks up the
+          # indentation and dies with IndentationError.)
+          readrev() {
+            python3 -c 'import json,sys; l=json.load(open(sys.argv[1])); r=l["root"]; n=l["nodes"][r] if isinstance(r,str) else r; ref=n["inputs"]["nixpkgs"]; nm=ref if isinstance(ref,str) else ref["node"]; print(l["nodes"][nm]["locked"]["rev"])' "$1"
+          }
+
+          before=$(readrev flake.lock)
+          nix flake update nixpkgs
+          after=$(readrev flake.lock)
+          echo "nixpkgs rev: ${before:0:8} -> ${after:0:8}"
+          if [ "$before" != "$after" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Resolve target tag
         id: tag
@@ -131,13 +175,28 @@ jobs:
             echo "target: $TAG @ $SHA"
           fi
 
-      - name: Skip (already current)
-        if: steps.tag.outputs.already-pinned == 'true'
+      - name: Plan
+        id: plan
+        # One place that decides whether the expensive half runs: a new tag, an
+        # explicit force, or a nixpkgs bump (which changes the derivation, so the
+        # cache must be refreshed even when the tag is unchanged).
         run: |
-          echo "No new v*-linux tag since $(grep -oP '# tag: \K.*' pkgs/foundation-sunshine-upstream/default.nix) — done."
+          set -euo pipefail
+          work=false
+          if [ "${{ steps.tag.outputs.already-pinned }}" = 'false' ] \
+             || [ "${{ inputs.force }}" = 'true' ] \
+             || [ "${{ steps.lock.outputs.changed }}" = 'true' ]; then
+            work=true
+          fi
+          echo "work=$work" >> "$GITHUB_OUTPUT"
+          if [ "$work" = true ]; then
+            echo "will build + push — tag: ${{ steps.tag.outputs.tag }}, new tag: ${{ steps.tag.outputs.already-pinned == 'false' }}, nixpkgs moved: ${{ steps.lock.outputs.changed == 'true' }}, force: ${{ inputs.force == 'true' }}"
+          else
+            echo "nothing to do — ${{ steps.tag.outputs.tag }} is already pinned and nixpkgs has not moved"
+          fi
 
       - name: Prefetch source hash
-        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
+        if: steps.plan.outputs.work == 'true'
         id: hash
         run: |
           set -euo pipefail
@@ -168,7 +227,7 @@ jobs:
           echo "hash=$H" >> "$GITHUB_OUTPUT"
 
       - name: Bump pin (version / rev / hash / README)
-        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
+        if: steps.plan.outputs.work == 'true'
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           SHA: ${{ steps.tag.outputs.sha }}
@@ -180,7 +239,7 @@ jobs:
           git --no-pager diff --stat
 
       - name: Build (hash-fixup retry x3)
-        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
+        if: steps.plan.outputs.work == 'true'
         id: build
         env:
           # Needed by the post-build hash normalisation below. `set -u` is on:
@@ -221,11 +280,10 @@ jobs:
           fi
           test -n "$OUT" || { echo "could not determine the built out path (nix re-ask and log fallback both empty)"; exit 1; }
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
-          # drv fingerprint: this is what the HOST has to match for the cache to
-          # hit (the value is pinned by flake.lock, see scripts/align-lock.sh).
-          # Recorded reference at the time of writing: q0yhzi9n1ax6s2z8zisfl1m9fi002dha.
-          # If the run prints something else, the lock has drifted from the host
-          # and every host build silently goes back to compiling.
+          # drv fingerprint of the artifact the host will substitute. The host
+          # consumes this repo's packages output verbatim, so this value changes
+          # whenever this repo's nixpkgs moves — that is expected, not drift.
+          # Recorded 2026-09 (nixpkgs e158d9ed): q0yhzi9n1ax6s2z8zisfl1m9fi002dha.
           DRV=$(nix eval --raw .#foundation-sunshine-upstream.drvPath)
           echo "drv=$DRV" >> "$GITHUB_OUTPUT"
           echo "drv: $DRV"
@@ -247,7 +305,7 @@ jobs:
           echo "built: $OUT"
 
       - name: Push closure to Cachix
-        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
+        if: steps.plan.outputs.work == 'true'
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
@@ -312,7 +370,7 @@ jobs:
           echo "pinned (retention): fsl-closure=3 revs, fsl-ui=1 rev, fsl-src=1 rev"
 
       - name: Commit + push the pin bump
-        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
+        if: steps.plan.outputs.work == 'true'
         run: |
           set -euo pipefail
           TAG="${{ steps.tag.outputs.tag }}"
@@ -324,15 +382,21 @@ jobs:
             echo "nothing to commit (forced cache-refresh run)"
             exit 0
           fi
-          git commit -m "pin(sunshine): ${TAG%-linux} ($TAG @ ${SHA:0:8})
-
-          Automated: tag detected -> pin bumped -> CUDA/NVENC build verified ->
-          closure pushed to Cachix ($CACHE) -> committed." \
+          if [ "${{ steps.tag.outputs.already-pinned }}" = 'false' ]; then
+            SUBJECT="pin(sunshine): ${TAG%-linux} ($TAG @ ${SHA:0:8})"
+          else
+            SUBJECT="chore(nixpkgs): follow nixos-unstable"
+          fi
+          # Two -m flags: git turns them into subject + body paragraph, which
+          # avoids relying on newlines surviving the YAML block scalar.
+          git commit \
+            -m "$SUBJECT" \
+            -m "Automated by .github/workflows/update-pin-and-cache.yml: nixpkgs refreshed to the branch tip when it moved, pin bumped when a new tag exists, CUDA/NVENC build verified, closure pushed to Cachix ($CACHE)." \
             && git push
           echo "committed and pushed"
 
       - name: Summary
-        if: steps.tag.outputs.already-pinned == 'false' || inputs.force
+        if: steps.plan.outputs.work == 'true'
         run: |
           {
             echo "### foundation-sunshine pin updated"
@@ -340,6 +404,6 @@ jobs:
             echo "- commit: \`${{ steps.tag.outputs.sha }}\`"
             echo "- source hash: \`$(cat "$RUNNER_TEMP/src-hash.txt" 2>/dev/null || echo 'n/a (build step skipped)')\`"
             echo "- build: \`${{ steps.build.outputs.out }}\`"
-            echo "- drv (the host matches this for a cache hit; see README \"Aligning the lock with the host\"): \`${{ steps.build.outputs.drv }}\`"
+            echo "- drv (what the host substitutes; see README \"How the host consumes this repo\"): \`${{ steps.build.outputs.drv }}\`"
             echo "- cache: pushed closure to \`${{ env.CACHE }}.cachix.org\`"
           } >> "$GITHUB_STEP_SUMMARY"

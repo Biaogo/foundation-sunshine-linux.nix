@@ -157,45 +157,44 @@ nixpkgs pin** — i.e. through the flake (`nix build github:…`, or
 `inputs.<fsl>.packages.<system>.foundation-sunshine-upstream`). A consumer that
 re-`callPackage`s the expression against its *own* nixpkgs revision produces a
 different derivation (different deps) and will always miss, ending up with a
-local build. If you control the consumer, consume the flake output.
+local build. If you control the consumer, consume the flake output — that is
+exactly what the NixOS host does (see the next section).
 
-### Aligning the lock with the host (url stays `nixos-unstable`)
+### How the host consumes this repo (and why the cache always hits)
 
-`inputs.nixpkgs.url` is only a branch name — what a build actually uses is the
-`rev` recorded in `flake.lock`, and nothing moves that automatically. This repo
-sat on the 2026-09-08 rev while the host moved to 2026-09-26, so CI built a
-derivation the host never substitutes. Align the **lock** (flake.nix untouched):
+The NixOS host takes the package **verbatim from this repo's own output**:
 
-```bash
-./scripts/align-lock.sh            # report only
-./scripts/align-lock.sh --apply    # rewrite flake.lock, nothing else
-./scripts/align-lock.sh --push     # commit + push → CI poll rebuilds + republishes
+```nix
+# host flake.nix — deliberately NO `inputs.nixpkgs.follows` on this input
+foundation-sunshine-linux.url = "github:Biaogo/foundation-sunshine-linux.nix";
+# host pkgs/default.nix
+foundation-sunshine =
+  inputs.foundation-sunshine-linux.packages.${pkgs.system}.foundation-sunshine-upstream;
 ```
 
-Measured after aligning: `nix eval --raw .#foundation-sunshine-upstream.drvPath`
-= `q0yhzi9n1ax6s2z8zisfl1m9fi002dha-…drv` — identical to the host's, i.e. the
-cache now hits for the host. Do **not** read the host's rev with
-`grep '"nixpkgs"' flake.lock`: a lock file holds several nixpkgs nodes (the host
-has a second one shared by `llm-agents`), and you would pick the wrong one. The
-script follows `root.inputs.nixpkgs` to the node the host really uses.
+Because the host does not force this flake onto its own nixpkgs, the derivation
+it asks for is *by construction* the one this repo builds and publishes to
+`biaogo.cachix.org` — so the cache always hits and the host never compiles
+Sunshine. Measured 2026-09: host drv `q0yhzi9n1ax6s2z8zisfl1m9fi002dha-…` == CI
+drv, and its output `0vfcm1sagj…` is HIT in the cache.
 
-Caveat: `nix flake update` in *this* repo moves the lock to the branch tip and
-re-introduces the drift — re-run the script afterwards, or simply don't update
-here (the host's rev is the useful "latest").
+That makes **this repo the single source of truth for the nixpkgs rev** — the
+opposite of a `follows` setup, where the host's rev decides and the CI can never
+match it. Tracking the tip of `nixos-unstable` is therefore intentional:
 
-**This is automated**: `.github/workflows/align-host-nixpkgs.yml` runs hourly,
-reads the host repo's `flake.lock`, re-locks this repo when the host has moved,
-pushes, and then dispatches the build+push workflow so the cache follows. It
-needs exactly one of these, set up once:
+- `update-pin-and-cache.yml` does both halves in one run: it first moves
+  `flake.lock` to the branch tip (on every 30-min poll; a manual run can switch
+  that off with the `bump_nixpkgs` checkbox), then — if anything actually moved —
+  builds and pushes, so the cache is refreshed for the new rev automatically.
+  One `Plan` step decides; no secrets, nothing outside this repo.
+- the host's `nh os switch -u` picks up this repo's newest commit and therefore
+  asks for exactly the artifact that was just published.
 
-- repository secret `HOST_REPO_TOKEN` — a fine-grained PAT with **read-only
-  "Contents"** on `Biaogo/nixos` (the host repo is private), or
-- `Biaogo/nixos` being public — the workflow then uses the anonymous raw URL and
-  needs no secret.
+Two rules follow — either violation re-introduces the miss:
 
-With neither, it logs `::notice::` and exits cleanly, and the manual script above
-stays the fallback. `scripts/align-lock.sh` does the same thing locally (handy
-before pushing a host bump yourself).
+1. do not pin this repo's nixpkgs to a fixed rev, and
+2. do not put `inputs.nixpkgs.follows = "nixpkgs"` back on the host side (nor
+   switch the host back to `callPackage`-ing the expression).
 
 | | |
 |---|---|
