@@ -1,0 +1,138 @@
+name: Align nixpkgs with the host repo
+
+# The binary cache is keyed by derivation, so `flake.lock` has to sit on the same
+# nixpkgs rev the NixOS host uses — otherwise the runner builds a path the host
+# never substitutes and the host compiles Sunshine locally (~40 min).
+#
+# Doing that by hand (`scripts/align-lock.sh --push`) is the kind of chore this
+# workflow exists to remove: once an hour it reads the host repo's flake.lock,
+# re-locks this repo when the host has moved, pushes the change and then
+# dispatches the build+push workflow so the cache follows immediately.
+#
+# Needs ONE of the following, once:
+#   * secret `HOST_REPO_TOKEN` — fine-grained PAT with read-only "Contents" on
+#     the host repo (it is private), or
+#   * the host repo being public — the step then falls back to the anonymous raw
+#     URL and needs no secret.
+# With neither, the step logs a notice and exits cleanly (the committed lock is
+# kept), so the schedule never spams failures.
+#
+# `nix flake update` must NOT be run in this repo: it would move the lock to the
+# branch tip and re-introduce exactly the drift this workflow fixes.
+
+on:
+  schedule:
+    - cron: "15 * * * *" # hourly; the pin workflow polls at :00/:30
+  workflow_dispatch:
+
+concurrency:
+  # Same group as the pin workflow: both push to main, so serialise them.
+  group: update-pin-and-cache
+  cancel-in-progress: false
+
+permissions:
+  contents: write # commit + push the re-lock
+  actions: write # dispatch the build workflow
+
+env:
+  HOST_REPO: Biaogo/nixos
+  HOST_REF: main
+  BUILD_WORKFLOW: update-pin-and-cache.yml
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (this repo)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the push-retry path does `git pull --rebase`
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - name: Read the host's nixpkgs rev
+        id: host
+        env:
+          HOST_REPO_TOKEN: ${{ secrets.HOST_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          lock=/tmp/host-flake.lock
+          if [ -n "${HOST_REPO_TOKEN:-}" ]; then
+            curl -fsSL -H "Authorization: Bearer $HOST_REPO_TOKEN" \
+                 -H "Accept: application/vnd.github.raw" \
+                 -o "$lock" \
+                 "https://api.github.com/repos/$HOST_REPO/contents/flake.lock?ref=$HOST_REF" \
+              || {
+                   echo "::error::HOST_REPO_TOKEN is set but flake.lock of $HOST_REPO could not be read — check the token scope (needs read-only Contents) and the repo name"
+                   exit 1
+                 }
+          elif curl -fsSL -o "$lock" "https://raw.githubusercontent.com/$HOST_REPO/$HOST_REF/flake.lock"; then
+            echo "::notice::$HOST_REPO is publicly readable — no token needed"
+          else
+            echo "::notice::cannot read $HOST_REPO (private, and no HOST_REPO_TOKEN secret) — skipping; add a read-only token to automate this"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The host's rev is NOT `nodes.nixpkgs`: a lock file usually holds
+          # several nixpkgs nodes (the host has a second one shared by
+          # `llm-agents`). Follow root.inputs.nixpkgs to the node the host uses.
+          # (Keep this on ONE line: a wrapped `python3 -c` picks up the extra
+          # indentation and dies with IndentationError — caught 2026-09 by
+          # running the step locally.)
+          readrev() {
+            python3 -c 'import json,sys; l=json.load(open(sys.argv[1])); r=l["root"]; n=l["nodes"][r] if isinstance(r,str) else r; ref=n["inputs"]["nixpkgs"]; nm=ref if isinstance(ref,str) else ref["node"]; rev=l["nodes"][nm]["locked"]["rev"]; assert len(rev)==40, rev; print(rev)' "$1"
+          }
+          host_rev=$(readrev "$lock")
+          our_rev=$(readrev flake.lock)
+          echo "rev=$host_rev" >> "$GITHUB_OUTPUT"
+          echo "host nixpkgs rev: $host_rev"
+          echo "this nixpkgs rev: $our_rev"
+
+      - name: Re-lock and push when the host moved
+        id: align
+        env:
+          HOST_REV: ${{ steps.host.outputs.rev }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.host.outputs.skip }}" = 'true' ]; then
+            echo "nothing to align (see the notice above)"
+            exit 0
+          fi
+          our_rev=$(python3 -c 'import json; l=json.load(open("flake.lock")); r=l["root"]; n=l["nodes"][r] if isinstance(r,str) else r; ref=n["inputs"]["nixpkgs"]; nm=ref if isinstance(ref,str) else ref["node"]; print(l["nodes"][nm]["locked"]["rev"])')
+          if [ "$HOST_REV" = "$our_rev" ]; then
+            echo "already aligned with the host ($HOST_REV) — nothing to do"
+            exit 0
+          fi
+          echo "host moved: $our_rev -> $HOST_REV"
+          nix flake lock --override-input nixpkgs "github:NixOS/nixpkgs/$HOST_REV"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.lock
+          if git diff --cached --quiet; then
+            echo "lock already matches — nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(nixpkgs): follow host rev ${HOST_REV:0:8} (host flake.lock moved; keeps the cache keys identical)"
+          for attempt in 1 2 3; do
+            if git push; then echo "pushed"; break; fi
+            echo "push rejected (attempt $attempt) — rebasing onto origin/main"
+            git pull --rebase origin main
+            [ "$attempt" = 3 ] && { echo "could not push after 3 attempts"; exit 1; }
+          done
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "drv now evaluates to: $(nix eval --raw .#foundation-sunshine-upstream.drvPath)"
+
+      - name: Trigger the build + cache push
+        if: steps.align.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run "$BUILD_WORKFLOW" -f force=true
+          echo "dispatched $BUILD_WORKFLOW (force) so the cache follows the new rev"

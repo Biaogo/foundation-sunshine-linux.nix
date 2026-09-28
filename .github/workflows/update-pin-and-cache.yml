@@ -221,6 +221,14 @@ jobs:
           fi
           test -n "$OUT" || { echo "could not determine the built out path (nix re-ask and log fallback both empty)"; exit 1; }
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          # drv fingerprint: this is what the HOST has to match for the cache to
+          # hit (the value is pinned by flake.lock, see scripts/align-lock.sh).
+          # Recorded reference at the time of writing: q0yhzi9n1ax6s2z8zisfl1m9fi002dha.
+          # If the run prints something else, the lock has drifted from the host
+          # and every host build silently goes back to compiling.
+          DRV=$(nix eval --raw .#foundation-sunshine-upstream.drvPath)
+          echo "drv=$DRV" >> "$GITHUB_OUTPUT"
+          echo "drv: $DRV"
 
           # Pin the source hash to nix's OWN value, never to a grep of the log
           # and never to the prefetch guess: `src` uses fetchSubmodules = true,
@@ -332,5 +340,6 @@ jobs:
             echo "- commit: \`${{ steps.tag.outputs.sha }}\`"
             echo "- source hash: \`$(cat "$RUNNER_TEMP/src-hash.txt" 2>/dev/null || echo 'n/a (build step skipped)')\`"
             echo "- build: \`${{ steps.build.outputs.out }}\`"
+            echo "- drv (the host matches this for a cache hit; see README \"Aligning the lock with the host\"): \`${{ steps.build.outputs.drv }}\`"
             echo "- cache: pushed closure to \`${{ env.CACHE }}.cachix.org\`"
           } >> "$GITHUB_STEP_SUMMARY"

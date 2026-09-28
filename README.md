@@ -183,13 +183,35 @@ Caveat: `nix flake update` in *this* repo moves the lock to the branch tip and
 re-introduces the drift — re-run the script afterwards, or simply don't update
 here (the host's rev is the useful "latest").
 
+**This is automated**: `.github/workflows/align-host-nixpkgs.yml` runs hourly,
+reads the host repo's `flake.lock`, re-locks this repo when the host has moved,
+pushes, and then dispatches the build+push workflow so the cache follows. It
+needs exactly one of these, set up once:
+
+- repository secret `HOST_REPO_TOKEN` — a fine-grained PAT with **read-only
+  "Contents"** on `Biaogo/nixos` (the host repo is private), or
+- `Biaogo/nixos` being public — the workflow then uses the anonymous raw URL and
+  needs no secret.
+
+With neither, it logs `::notice::` and exits cleanly, and the manual script above
+stays the fallback. `scripts/align-lock.sh` does the same thing locally (handy
+before pushing a host bump yourself).
+
 | | |
 |---|---|
 | Substituter | `https://biaogo.cachix.org` |
 | Public key | `biaogo.cachix.org-1:pEsKASFTETzWAVGGsjpHnq869V5KNeDOBhQahLlrPzY=` |
 
 Cache repair / manual push (maintainer) — the workflow does this itself,
-verifies each path reads back, and then pins all three:
+verifies each path reads back, and then pins all three.
+
+When verifying by hand, beware nix's **negative narinfo cache**: a
+`nix path-info --store https://biaogo.cachix.org <path>` issued before a push has
+propagated keeps reporting MISS for up to an hour even though the path is fine.
+Use `--option narinfo-cache-negative-ttl 0` (or fetch `<hash>.narinfo` with curl)
+**and** keep a control path that must still miss — otherwise you can "reproduce"
+a cache loss that never happened (2026-09: that mistake cost a multi-round
+investigation into a garbage-collection problem that did not exist).
 
 ```bash
 OUT=$(nix build .#foundation-sunshine-upstream --no-link --print-out-paths)
