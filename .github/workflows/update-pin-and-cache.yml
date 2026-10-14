@@ -140,7 +140,7 @@ jobs:
             # seconds and gives real tag dates; only v<date>[.<n>]-linux names are considered.
             rm -rf /tmp/fork-tags.git
             git clone --quiet --bare --filter=blob:none "https://github.com/$FORK.git" /tmp/fork-tags.git
-            TAG=$(git -C /tmp/fork-tags.git for-each-ref --sort=-creatordate \
+            TAG=$(git -C /tmp/fork-tags.git for-each-ref --sort=-version:refname --sort=-creatordate \
                     --format='%(refname:short)' 'refs/tags/v*-linux' \
                   | grep -E '^v[0-9]{4}[.][0-9]{2}[.][0-9]{2}([.][0-9]+)?-linux$' | head -1)
             if [ -z "$TAG" ]; then
